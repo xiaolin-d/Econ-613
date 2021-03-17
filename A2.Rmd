@@ -1,0 +1,369 @@
+---
+title: "Econ 613 Assignment 2"
+author: "Xiaolin Ding"
+date: "`r format(Sys.time(), '%m/%d/%y')`"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(bayesm)
+library(dplyr)
+library(tidyverse)
+data(margarine)
+choiceprice = margarine$choicePrice
+demos = margarine$demo
+```
+
+# Exercise 1 Data Description
+
+## Average prices of each product
+```{r}
+print(apply(as.matrix(choiceprice[,3:12]), 2, mean))
+
+```
+
+## Dispersion (variance) in prices of each product
+```{r}
+print(apply(as.matrix(choiceprice[,3:12]), 2, var))
+```
+
+## Average price of all products
+```{r}
+average = mean(unlist(choiceprice[,3:12]))
+print(average)
+```
+
+## Dispersion (variance) in prices of all products
+```{r}
+dispersion = var(unlist(choiceprice[,3:12]))
+print(dispersion)
+```
+
+## Market share of each product
+```{r}
+marketshare1 = data.frame(matrix(ncol = 10, nrow = 0))
+colnames(marketshare1) = c(names(choiceprice[,3:12]))
+for (i in 1:10){
+  count = 0
+  for (j in 1:nrow(choiceprice)){
+    if(choiceprice[j,2]==i){
+      count = count+1
+    }
+    marketshare1[1,i] = count/nrow(choiceprice)
+  }
+}
+print(as.matrix(marketshare1))
+```
+
+## Market share by price bins
+```{r}
+marketshare2 = data.frame(matrix(ncol = 2, nrow = 0))
+colnames(marketshare2) = c('Below average', 'Above average')
+count = 0
+for (i in 1:nrow(choiceprice)){
+  if (choiceprice[i,choiceprice$choice[i]+2]<=average){
+    count = count + 1
+  }
+}
+marketshare2[1,1] = count/nrow(choiceprice)
+marketshare2[1,2] = 1 - marketshare2[1,1]
+print(as.matrix(marketshare2))
+```
+
+## Most popular choice for different types of households
+```{r}
+# Extract hhid for different types of households
+incomeba = c()
+incomeaa = c()
+for (i in 1:nrow(demos)){
+  if (demos$Income[i]<=mean(demos$Income)){
+    incomeba = append(incomeba, demos$hhid[i])
+  }
+  else {
+    incomeaa = append(incomeaa, demos$hhid[i])
+  }
+}
+fs3orless = c()
+fsmorethan3 = c()
+for (i in 1:nrow(demos)){
+  if (demos$Fam_Size[i]<=3){
+    fs3orless = append(fs3orless, demos$hhid[i])
+  }
+  else {
+    fsmorethan3 = append(fsmorethan3, demos$hhid[i])
+  }
+}
+college = c()
+nocollege = c()
+for (i in 1:nrow(demos)){
+  if (demos$college[i]==1){
+    college = append(college, demos$hhid[i])
+  }
+  else {
+    nocollege = append(nocollege, demos$hhid[i])
+  }
+}
+whtcollar = c()
+notwhtcollar = c()
+for (i in 1:nrow(demos)){
+  if (demos$whtcollar[i]==1){
+    whtcollar = append(whtcollar, demos$hhid[i])
+  }
+  else {
+    notwhtcollar = append(notwhtcollar, demos$hhid[i])
+  }
+}
+retired = c()
+notretired = c()
+for (i in 1:nrow(demos)){
+  if (demos$retired[i]==1){
+    retired = append(retired, demos$hhid[i])
+  }
+  else {
+    notretired = append(notretired, demos$hhid[i])
+  }
+}
+
+# Define the function mode()
+mode = function(x) {
+  ux = unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+# Most popular choice by household types
+popularchoice = data.frame(matrix(ncol = 10, nrow = 0))
+colnames(popularchoice) = c('Income below average', 'Income above average',
+                          'Family size 3 or less', 'Family size more than 3',
+                          'College', 'No college', 'White collar',
+                          'Not white collar', 'Retired', 'Not retired')
+popularchoice[1,1] =
+  mode(subset(choiceprice,is.element(choiceprice$hhid,incomeba))$choice)
+popularchoice[1,2] =
+  mode(subset(choiceprice,is.element(choiceprice$hhid,incomeaa))$choice)
+popularchoice[1,3] =
+  mode(subset(choiceprice,is.element(choiceprice$hhid,fs3orless))$choice)
+popularchoice[1,4] =
+  mode(subset(choiceprice,is.element(choiceprice$hhid,fsmorethan3))$choice)
+popularchoice[1,5] =
+  mode(subset(choiceprice,is.element(choiceprice$hhid,college))$choice)
+popularchoice[1,6] =
+  mode(subset(choiceprice,is.element(choiceprice$hhid,nocollege))$choice)
+popularchoice[1,7] =
+  mode(subset(choiceprice,is.element(choiceprice$hhid,whtcollar))$choice)
+popularchoice[1,8] =
+  mode(subset(choiceprice,is.element(choiceprice$hhid,notwhtcollar))$choice)
+popularchoice[1,9] =
+  mode(subset(choiceprice,is.element(choiceprice$hhid,retired))$choice)
+popularchoice[1,10] =
+  mode(subset(choiceprice,is.element(choiceprice$hhid,notretired))$choice)
+print(as.matrix(popularchoice))
+```
+
+# Exercise 2 First Model
+
+```{r}
+# Create the data "cp" by adding the variable "price" and "type" to the data
+# "choiceprice", where "price" is the price of the product chosen and "type"
+# is the type of the product chosen
+cp = choiceprice
+cp$price = NA
+cp$type = NA
+for (i in 1:nrow(cp)){
+  cp$price[i] = cp[,cp$choice[i]+2][i]
+  cp$type[i] = colnames(cp[cp$choice[i]+2])
+}
+cp[1:10,]
+```
+
+## Mixed logit model
+* Choice probability $$p_{i}(j)=\frac{e^{c_{j}+\alpha*price_{ij}}}{\sum_{l}e^{c_{l}+\alpha*price_{il}}}$$
+* Log likelihood function $$L(c,\alpha|Data=price)=\sum_{i=1}^{n}\sum_{l}log(p{i}(l))$$
+* Maximum likelihood estimation $$\max_{c,\alpha}L(c,\alpha|Data)$$
+```{r}
+# Log likelihood function for the data "cp"
+likelihood1 = function(par){
+  cp$constant = 0
+  cp$constant[cp$type=='PPk_Stk'] = par[1]
+  cp$constant[cp$type=='PBB_Stk'] = par[2]
+  cp$constant[cp$type=='PFl_Stk'] = par[3]
+  cp$constant[cp$type=='PHse_Stk'] = par[4]
+  cp$constant[cp$type=='PGen_Stk'] = par[5]
+  cp$constant[cp$type=='PImp_Stk'] = par[6]
+  cp$constant[cp$type=='PSS_Tub'] = par[7]
+  cp$constant[cp$type=='PPk_Tub'] = par[8]
+  cp$constant[cp$type=='PFl_Tub'] = par[9]
+  pr = exp(cp$constant+par[10]*cp$price)/(exp(par[1]+par[10]*cp$PPk_Stk)
+                                          +exp(par[2]+par[10]*cp$PBB_Stk)
+                                          +exp(par[3]+par[10]*cp$PFl_Stk)
+                                          +exp(par[4]+par[10]*cp$PHse_Stk)
+                                          +exp(par[5]+par[10]*cp$PGen_Stk)
+                                          +exp(par[6]+par[10]*cp$PImp_Stk)
+                                          +exp(par[7]+par[10]*cp$PSS_Tub)
+                                          +exp(par[8]+par[10]*cp$PPk_Tub)
+                                          +exp(par[9]+par[10]*cp$PFl_Tub)
+                                          +exp(par[10]*cp$PHse_Tub))
+  return(-sum(log(pr)))
+}
+
+# Maximum likelihood estimation
+est1 = optim(runif(10),likelihood1,method='BFGS')
+```
+The coefficient on price is `r est1$par[10]`. Therefore, an increase in the price of product j will decrease the probability that household i buys product j.
+
+# Exercise 3 Second Model
+
+```{r}
+# Create the data "ci" by changing the variable "price" to "income"
+ci = cp
+colnames(ci)[13] = 'income'
+ci$income = demos$Income[match(ci$hhid, demos$hhid)]
+ci[1:10,]
+```
+
+## Mixed logit model
+* Choice probability $$p_{i}(j)=\frac{e^{c_{j}+\beta*income_{i}}}{\sum_{l}e^{c_{l}+\beta*income_{i}}}$$
+* Log likelihood function $$L(c,\alpha|Data=income)=\sum_{i=1}^{n}\sum_{l}log(p{i}(l))$$
+* Maximum likelihood estimation $$\max_{c,\beta}L(c,\beta|Data)$$
+```{r}
+# Log likelihood function for the data "ci"
+likelihood2 = function(par){
+  ci$constant = 0
+  ci$constant[ci$type=='PPk_Stk'] = par[1]
+  ci$constant[ci$type=='PBB_Stk'] = par[2]
+  ci$constant[ci$type=='PFl_Stk'] = par[3]
+  ci$constant[ci$type=='PHse_Stk'] = par[4]
+  ci$constant[ci$type=='PGen_Stk'] = par[5]
+  ci$constant[ci$type=='PImp_Stk'] = par[6]
+  ci$constant[ci$type=='PSS_Tub'] = par[7]
+  ci$constant[ci$type=='PPk_Tub'] = par[8]
+  ci$constant[ci$type=='PFl_Tub'] = par[9]
+  pr = exp(ci$constant+par[10]*ci$income)/(exp(par[1]+par[10]*ci$income)
+                                           +exp(par[2]+par[10]*ci$income)
+                                           +exp(par[3]+par[10]*ci$income)
+                                           +exp(par[4]+par[10]*ci$income)
+                                           +exp(par[5]+par[10]*ci$income)
+                                           +exp(par[6]+par[10]*ci$income)
+                                           +exp(par[7]+par[10]*ci$income)
+                                           +exp(par[8]+par[10]*ci$income)
+                                           +exp(par[9]+par[10]*ci$income)
+                                           +exp(par[10]*ci$income))
+  return(-sum(log(pr)))
+}
+
+# Maximum likelihood estimation
+est2 = optim(runif(10),likelihood2,method='BFGS')
+```
+The coefficient on income is `r est2$par[10]`. Therefore, an increase in household i's income will increase the probability that household i buys product j.
+
+# Exercise 4 Marginal Effects
+
+* The marginal effect of the price of product k on household i's demand of product j is $$\frac{\partial p{ij}}{\partial price_{ik}}=p_{ij}(\delta_{ijk}-p_{ik})\alpha=p_{ij}(\delta_{ijk}-p_{ik})(`r est1$par[10]`)$$, where $\delta_{ijk}$ is an indicator variable equal to 1 if $j=k$ and equal to 0 otherwise.
+
+* The marginal effect of household i's income on household i's demand of product j is $$\frac{\partial p_{ij}}{\partial income_{i}}=p_{ij}(1-1)\beta=0$$.
+
+# Exercise 5 IIA
+
+## Full set of alternatives
+```{r}
+# Create the data "cf" by adding he variable "income" to the data "cp"
+cf = cp
+cf$income = ci$income
+cf[1:10,]
+```
+
+### Mixed logit model
+* Choice probability $$p_{i}(j)=\frac{e^{c_{j}+\alpha*price_{ij}+\beta*income_{i}}}{\sum_{l}e^{c_{l}+\alpha*price_{ij}+\beta*income_{i}}}$$
+* Log likelihood function $$L(c,\alpha|Data=price,income)=\sum_{i=1}^{n}\sum_{l}log(p{i}(l))$$
+* Maximum likelihood estimation $$\max_{c,\alpha,\beta}L(c,\alpha,\beta|Data)$$
+```{r}
+# Log likelihood function for the data "cf"
+likelihood3 = function(par){
+  cf$constant = 0
+  cf$constant[cf$type=='PPk_Stk'] = par[1]
+  cf$constant[cf$type=='PBB_Stk'] = par[2]
+  cf$constant[cf$type=='PFl_Stk'] = par[3]
+  cf$constant[cf$type=='PHse_Stk'] = par[4]
+  cf$constant[cf$type=='PGen_Stk'] = par[5]
+  cf$constant[cf$type=='PImp_Stk'] = par[6]
+  cf$constant[cf$type=='PSS_Tub'] = par[7]
+  cf$constant[cf$type=='PPk_Tub'] = par[8]
+  cf$constant[cf$type=='PFl_Tub'] = par[9]
+  pr = exp(cf$constant+par[10]*cf$price+par[11]*cf$income)/
+    (exp(par[1]+par[10]*cf$PPk_Stk+par[11]*cf$income)
+    +exp(par[2]+par[10]*cf$PBB_Stk+par[11]*cf$income)
+    +exp(par[3]+par[10]*cf$PFl_Stk+par[11]*cf$income)
+    +exp(par[4]+par[10]*cf$PHse_Stk+par[11]*cf$income)
+    +exp(par[5]+par[10]*cf$PGen_Stk+par[11]*cf$income)
+    +exp(par[6]+par[10]*cf$PImp_Stk+par[11]*cf$income)
+    +exp(par[7]+par[10]*cf$PSS_Tub+par[11]*cf$income)
+    +exp(par[8]+par[10]*cf$PPk_Tub+par[11]*cf$income)
+    +exp(par[9]+par[10]*cf$PFl_Tub+par[11]*cf$income)
+    +exp(par[10]*cf$PHse_Tub+par[11]*cf$income))
+  return(-sum(log(pr)))
+}
+
+# Maximum likelihood estimation
+est3 = optim(runif(11),likelihood3,method='BFGS')
+```
+The estimated coefficients on price and income are `r est3$par[10]` and `r est3$par[11]`, respectively.
+
+## Subset of alternatives
+```{r}
+# Create the data “cr” by removing the choice “PImp_Stk” from the data “cf”
+cr = cf[!(cf$type=='PImp_Stk'),]
+cr[1:10,]
+```
+
+### Mixed logit model
+```{r}
+# Log likelihood function for the data "cr"
+likelihood4 = function(par){
+  cr$constant = 0
+  cr$constant[cr$type=='PPk_Stk'] = par[1]
+  cr$constant[cr$type=='PBB_Stk'] = par[2]
+  cr$constant[cr$type=='PFl_Stk'] = par[3]
+  cr$constant[cr$type=='PHse_Stk'] = par[4]
+  cr$constant[cr$type=='PGen_Stk'] = par[5]
+  cr$constant[cr$type=='PSS_Tub'] = par[6]
+  cr$constant[cr$type=='PPk_Tub'] = par[7]
+  cr$constant[cr$type=='PFl_Tub'] = par[8]
+  pr = exp(cr$constant+par[9]*cr$price+par[10]*cr$income)/
+    (exp(par[1]+par[9]*cr$PPk_Stk+par[10]*cr$income)
+    +exp(par[2]+par[9]*cr$PBB_Stk+par[10]*cr$income)
+    +exp(par[3]+par[9]*cr$PFl_Stk+par[10]*cr$income)
+    +exp(par[4]+par[9]*cr$PHse_Stk+par[10]*cr$income)
+    +exp(par[5]+par[9]*cr$PGen_Stk+par[10]*cr$income)
+    +exp(par[6]+par[9]*cr$PSS_Tub+par[10]*cr$income)
+    +exp(par[7]+par[9]*cr$PPk_Tub+par[10]*cr$income)
+    +exp(par[8]+par[9]*cr$PFl_Tub+par[10]*cr$income)
+    +exp(par[9]*cr$PHse_Tub+par[10]*cr$income))
+  return(-sum(log(pr)))
+}
+
+# Maximum likelihood estimation
+est4 = optim(runif(10),likelihood4,method='BFGS')
+```
+The estimated coefficients on price and income are `r est4$par[9]` and `r est4$par[10]`, respectively.
+
+### Compute the test statistic:
+```{r}
+MTT = -2*(-likelihood4(est3$par[-6])+likelihood4(est4$par))
+```
+$MTT=`r MTT`$
+
+### Conclude on IIA
+```{r}
+p = pchisq(MTT,df=10,lower.tail=FALSE)
+```
+$P(X>MTT|X\sim \chi^{2}(10))=`r p`$, so IIA is not violated.
+
+
+
+
+
+
+
+
