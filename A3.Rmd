@@ -1,0 +1,249 @@
+---
+title: "Econ 613 Assignment 2"
+author: "Xiaolin Ding"
+date: "`r format(Sys.time(), '%m/%d/%y')`"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(bayesm)
+library(plyr)
+library(dplyr)
+library(fastDummies)
+library(gmm)
+library(tidyr)
+library(tidyverse)
+```
+
+# Exercise 1 Links to the datasets
+
+```{r}
+pop = read.csv("file:///Users/DXL/Desktop/Econ613/population.csv")
+cri = read.csv("file:///Users/DXL/Desktop/Econ613/crime_long.csv")
+off = read.csv("file:///Users/DXL/Desktop/Econ613/officers.csv")
+```
+
+# Exercise 2 Data Manipulation
+
+* Total Crimes Per Month
+```{r}
+sum1 = cri %>% group_by(crime_month) %>%
+  summarise(cripermon=sum(crimes))
+month = as.Date(sum1 %>% pull(crime_month))
+cripermon = sum1 %>% pull(cripermon)
+plot(month,cripermon,col=1,type="l",xaxt='n',main='Total Crimes Per Month',
+     xlab='crime_month',ylab='crimes',lwd=1)
+axis.Date(1,at=seq(min(month),max(month),by='48 mon'),format='%Y-%m')
+```
+
+* Merged data df1
+```{r}
+df1 = full_join(cri, pop,
+                    by=c('crime_month'='month','district'='district'))
+df1[1:10,]
+```
+
+* Panel data df7 of unit over time with the following variables
+  + Total crimes per resident
+  + Violent crimes per resident
+  + Property crimes per resident
+  + Median income
+  + Share of black, Hispanic, and white residents
+```{r}
+sum2 = df1 %>% group_by(crime_month,district) %>%
+  summarise(cribydis=sum(crimes),popbydis=sum(tot_pop),white=sum(tot_white),
+            black=sum(tot_black),hisp=sum(tot_hisp),
+            med=quantile(p50_inc,1/2,na.rm=TRUE))
+sum3 = df1 %>% group_by(crime_month,district,crime_type) %>%
+  summarise(cribytype=sum(crimes))
+popbydis = sum2 %>% pull(popbydis)
+index1 = which(is.na(popbydis)==FALSE)
+popbydis = popbydis[!is.na(popbydis)]
+df2 = data.frame(matrix(ncol=0,nrow=length(popbydis)))
+crimonth = sum2 %>% pull(crime_month)
+df2$crimonth = crimonth[c(index1)]
+dis = sum2 %>% pull(district)
+df2$dis = dis[c(index1)]
+cribydis = sum2 %>% pull(cribydis)
+df2$cribydis = cribydis[c(index1)]
+df2$popbydis = popbydis
+white = sum2 %>% pull(white)
+df2$white = white[c(index1)]
+black = sum2 %>% pull(black)
+df2$black = black[c(index1)]
+hisp = sum2 %>% pull(hisp)
+df2$hisp = hisp[c(index1)]
+med = sum2 %>% pull(med)
+df2$med = med[c(index1)]
+crimon = sum3 %>% pull(crime_month)
+df3 = data.frame(matrix(ncol=0,nrow=length(crimon)))
+df3$crimon = crimon
+df3$dis = sum3 %>% pull(district)
+df3$type = sum3 %>% pull(crime_type)
+df3$cribytype = sum3 %>% pull(cribytype)
+df4 = full_join(df3, df2,
+                    by=c('crimon'='crimonth','dis'='dis'))
+index2 = which(is.na(df4$cribydis)==FALSE)
+df5 = df4[c(index2),]
+df5$criperres = df5$cribydis/df5$popbydis
+df5$typeperres = df5$cribytype/df5$popbydis
+df5$shareofb = df5$black/df5$popbydis
+df5$shareofh = df5$hisp/df5$popbydis
+df5$shareofw = df5$white/df5$popbydis
+df6 = df5[,c(1:3,5,10:15)]
+df6 = subset(df6, df6$type=='violent' | df6$type=='property')
+df7 = spread(df6, type, typeperres)
+colnames(df7) = c('month','district','total_crime','median_income',
+                  'crime_per_resident','share_of_black',
+                  'share_of_hispanic','share_of_white',
+                  'property_per_resident','violent_per_resident')
+df7[1:10,]
+```
+
+# Exercise 3 Panel Data: Introduction
+
+* Create data df9 by merging the data 'off' with the previous panel data df7
+```{r}
+df8 = full_join(off, df7,
+                    by=c('month'='month','unit'='district'))
+df9 = df8[,c(1:7,9:11)]
+df9 = df9[rowSums(is.na(df9[,1:10]))== 0,]
+df9[1:10,]
+```
+
+* Estimate $\beta$ and $\gamma$
+```{r}
+X1 = as.matrix(df9[,c(4,6:10)])
+Y1 = as.matrix(df9[,5])
+coef1 = solve(t(X1)%*%X1)%*%t(X1)%*%Y1
+coef1[1:6,1]
+```
+The estimated $\beta$ is `coef1[1,1]` and the estimated $\gamma$ are `r coef1[2:6,1]`.
+
+# Exercise 4 Panel Data: More controls
+
+* Create data df10 with district and month dummies
+```{r}
+df10 = dummy_cols(df9, select_columns=c('unit','month'))
+df10[1:10,]
+```
+
+* Estimate $\beta$, $\gamma$, $\psi$, and $\kappa$ with district and year and month dummies, whereas the base group dummies are excluded
+```{r}
+X2 = as.matrix(df10[,c(4,6:34,36:166)])
+Y2 = as.matrix(df10[,5])
+coef2 = solve(t(X2)%*%X2)%*%t(X2)%*%Y2
+coef2[1:6,1]
+```
+The estimated $\beta$ is `r coef2[1,1]`, the estimated $\gamma$ are `r coef2[2:6,1]`, the estimated $\psi$ are `r coef2[7:30,1]`, and the estimated $\kappa$ are `r coef2[31:161,1]`.
+
+# Exercise 5 Panel Data: Individual fixed effects
+
+* Create data df11 with mean differences, df12 with means, and df13 with first differences
+```{r}
+df11 = df10 %>% group_by(NUID) %>%
+  mutate(across(!month & !unit, ~.x-mean(.x)))
+df12 = df10 %>% group_by(NUID) %>%
+  summarise(across(!month & !unit, list(mean)))
+df13 = df10 %>% group_by(NUID) %>%
+  mutate(across(!month & !unit, ~.x-lag(.x)))
+df13 = df13[rowSums(is.na(df13[,1:10]))== 0,]
+df11 = as.data.frame(df11)
+df12 = as.data.frame(df12)
+df13 = as.data.frame(df13)
+df11[1:10,]
+df12[1:10,]
+df13[1:10,]
+```
+
+## Within estimator
+* Consider the following model
+$$
+A_{ijt}-\bar{A}_{ij}=\beta(\tau_{it}-\bar{\tau}_{i})+\gamma(Z_{jt}-\bar{Z}_{j})+(\psi_{j}-\bar{\psi}_{j})+(\kappa_{t}-\bar{\kappa})+(\epsilon_{ijt}-\bar{\epsilon}_{ij})
+$$
+where $\bar{\psi}_{j}$ is the number of periods in which individual $i$ is on duty in district $j$ divided by the total number of periods, which measures the average district fixed effects.
+```{r}
+X3 = as.matrix(df11[,c(4,6:34,36:166)])
+Y3 = as.matrix(df11[,5])
+coef3 = solve(t(X3)%*%X3)%*%t(X3)%*%Y3
+coef3[1,1]
+```
+The estimated $\beta$ is `r coef3[1,1]`.
+
+## Between estimator
+* Consider the following model
+$$
+\bar{A}_{ij}=\alpha_{i}+\beta\bar{\tau}_{i}+\gamma\bar{Z}_{j}+\bar{\psi}_{j}+\bar{\kappa}+\bar{\epsilon}_{ij}
+$$
+* Since there are 10k+ individuals, the calculation amount is too large if I estimate the individual fixed effects for each individual, so I ignore the individual fixed effects and simply consider the following model
+$$
+\bar{A}_{ij}=\beta\bar{\tau}_{i}+\gamma\bar{Z}_{j}+\bar{\psi}_{j}+\bar{\kappa}+\bar{\epsilon}_{ij}
+$$
+```{r}
+X4 = as.matrix(df12[,c(2,4:32,34:164)])
+Y4 = as.matrix(df12[,3])
+coef4 = solve(t(X4)%*%X4,tol=1e-100)%*%t(X4)%*%Y4
+coef4[1,1]
+```
+The estimated $\beta$ is `r coef4[1,1]`.
+
+## First difference estimator
+* Consider the following model
+$$
+A_{ij}-A_{i,j-1}=\beta(\tau_{it}-\tau_{i,t-1})+\gamma(Z_{jt}-Z_{j,t-1})+(\psi_{j}-\psi_{k})+(\kappa_{t}-\kappa_{t-1})+(\epsilon_{ijt}-\epsilon_{ij,t-1}),
+$$
+where $\psi_{k}$ is the indicator for district in period $t-1$.
+```{r}
+X5 = as.matrix(df13[,c(4,6:34,36:166)])
+Y5 = as.matrix(df13[,5])
+coef5 = solve(t(X5)%*%X5,tol=1e-100)%*%t(X5)%*%Y5
+coef5[1,1]
+```
+The estimated $\beta$ is `r coef5[1,1]`. The within and between estimators are negative with small absolute value, while the first difference estimator is positive with small absolute value.
+
+## GMM
+* Since there are 10k+ individuals, the calculation amount is too large if I estimate the individual fixed effects for each individual, so I use the data df10 and only consider district and year and month fixed effects.
+* Estimate
+$$
+min_{\beta}[(Y-X\beta)^{'}X]I[X^{'}(Y-X\beta)]
+$$
+* Obtain
+$$
+\hat{\beta_{1}}=(X^{'}XX^{'}X)^{-1}X^{'}XX^{'}Y
+$$
+```{r}
+coef6 = solve(t(X2)%*%X2%*%t(X2)%*%X2,tol=1e-100)%*%t(X2)%*%X2%*%t(X2)%*%Y2
+coef6[1:6,1]
+```
+
+* Matrix of variance/covariance
+$$
+\hat{\mathbb{S}}_{n}=\frac{1}{N}X^{'}(Y-X\hat{\beta_{1}})(Y-X\hat{\beta_{1}})^{'}X
+$$
+```{r}
+s = t(X2)%*%(Y2-X2%*%coef6)%*%t(Y2-X2%*%coef6)%*%X2/nrow(X2)
+s[1:6,1:6]
+```
+
+* Solve the problem
+$$
+min_{\beta}[(Y-X\beta)^{'}X]\hat{\mathbb{S}}_{n}[X^{'}(Y-X\beta)]
+$$
+* Obtain
+$$
+\hat{\beta}_{GMM}=(X^{'}X\hat{\mathbb{S}}_{n}X^{'}X)^{-1}X^{'}X\hat{\mathbb{S}}_{n}X^{'}Y
+$$
+```{r}
+coef7 = solve(t(X2)%*%X2%*%s%*%t(X2)%*%X2,tol=1e-100)%*%
+  t(X2)%*%X2%*%s%*%t(X2)%*%Y2
+coef7[1:6,1]
+```
+The estimated $\beta$ is `r coef7[1,1]`, the estimated $\gamma$ are `r coef7[2:6,1]`, the estimated $\psi$ are `r coef7[7:30,1]`, and the estimated $\kappa$ are `r coef7[31:161,1]`.
+
+
+
+
+
